@@ -69,7 +69,7 @@ void loop() {
 void gateControl(){
   if(gateOpen){
   digitalWrite(2,HIGH);
-  timer1 = currentTime;
+  if(!gateOpened)timer1 = currentTime;
   gateOpened = true;
   }
   else{
@@ -113,7 +113,7 @@ void sendPostRequest(String data) {
     String payload = http.getString();
     Serial.println("POST Payload:");
     Serial.println(payload);
-    if(payload == "Data found"){
+    if(payload == "Data Found"){
       gateOpen = true;
     }
     else{
