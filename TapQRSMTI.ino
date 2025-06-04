@@ -6,6 +6,9 @@
 // These are the pins connected to the Wiegand D0 and D1 signals.
 #define PIN_D0 22   
 #define PIN_D1 23
+#define BEEPER 14   
+#define LED 12
+#define OUT 2
 
 // The object that handles the wiegand protocol
 Wiegand wiegand;
@@ -15,6 +18,9 @@ String oldHexString = "";
 
 bool gateOpen = false;
 bool gateOpened = false;
+bool noDataFound = false;
+bool comError = false;
+bool grantedBeep = false;
 
 unsigned long currentTime = 0;
 unsigned long timer1 = 0;
@@ -48,7 +54,11 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(PIN_D1), pinStateChanged, CHANGE);
   pinStateChanged();
 
-  pinMode(2,OUTPUT);
+  pinMode(OUT,OUTPUT);
+  pinMode(LED,OUTPUT);
+  pinMode(BEEPER,OUTPUT);
+  digitalWrite(LED,HIGH);
+  digitalWrite(BEEPER,HIGH);
 }
 
 void loop() {
@@ -68,18 +78,35 @@ void loop() {
 
 void gateControl(){
   if(gateOpen){
-  digitalWrite(2,HIGH);
-  if(!gateOpened)timer1 = currentTime;
+  digitalWrite(OUT,HIGH);
+  digitalWrite(LED,LOW);
   gateOpened = true;
   }
   else{
-    digitalWrite(2,LOW);
+    digitalWrite(OUT,LOW);
+    digitalWrite(LED,HIGH);
     gateOpened = false;
   }
   if(gateOpened){
     if(currentTime - timer1 >= 1000)gateOpen = false;
   }
+  if(noDataFound){
+    digitalWrite(BEEPER,LOW);
+    if(currentTime - timer1 >= 1000){
+      digitalWrite(BEEPER,HIGH);
+      noDataFound = false;
+    }
+  }
+  if(comError){
+    digitalWrite(BEEPER,LOW);
+    if(currentTime - timer1 >= 500){
+      digitalWrite(BEEPER,HIGH);
+      comError = false;
+    }
+
+  }
 }
+
 void sendPostRequest(String data) {
   // Always check connection right before starting the request
   if (!WiFi.isConnected()) {
@@ -115,13 +142,17 @@ void sendPostRequest(String data) {
     Serial.println(payload);
     if(payload == "Data Found"){
       gateOpen = true;
+      timer1 = currentTime;
     }
     else{
-
+      noDataFound = true;
+      timer1 = currentTime;
     }
   } else {
     Serial.printf("[HTTP] POST Error code: %d\n", httpResponseCode);
     Serial.printf("[HTTP] Error message: %s\n", http.errorToString(httpResponseCode).c_str());
+    comError = true;
+    timer1 = currentTime;
   }
 
   Serial.print("[HTTP] end...\n");
