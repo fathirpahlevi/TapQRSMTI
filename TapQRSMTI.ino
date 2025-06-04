@@ -13,6 +13,11 @@ Wiegand wiegand;
 String hexString = "";
 String oldHexString = "";
 
+bool gateOpen = false;
+bool gateOpened = false;
+
+unsigned long currentTime = 0;
+unsigned long timer1 = 0;
 // It's good practice to define constants for SSIDs, passwords, and URLs
 const char* ssid = "Otomasi Industri";
 const char* password = "12otomasi3";
@@ -42,20 +47,38 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(PIN_D0), pinStateChanged, CHANGE);
   attachInterrupt(digitalPinToInterrupt(PIN_D1), pinStateChanged, CHANGE);
   pinStateChanged();
+
+  pinMode(2,OUTPUT);
 }
 
 void loop() {
   // Example of calling the function with a delay
+  currentTime = millis();
   noInterrupts();
   wiegand.flush();
   interrupts();
   if(hexString != oldHexString){
     Serial.println("New Data");
-    oldHexString = data;
+    if(hexString.length() > 0)sendPostRequest(hexString);
+    oldHexString = hexString;
+    hexString = "";
   }
+  gateControl();
 }
-void checkChanges(String data){
 
+void gateControl(){
+  if(gateOpen){
+  digitalWrite(2,HIGH);
+  timer1 = currentTime;
+  gateOpened = true;
+  }
+  else{
+    digitalWrite(2,LOW);
+    gateOpened = false;
+  }
+  if(gateOpened){
+    if(currentTime - timer1 >= 1000)gateOpen = false;
+  }
 }
 void sendPostRequest(String data) {
   // Always check connection right before starting the request
@@ -90,6 +113,12 @@ void sendPostRequest(String data) {
     String payload = http.getString();
     Serial.println("POST Payload:");
     Serial.println(payload);
+    if(payload == "Data found"){
+      gateOpen = true;
+    }
+    else{
+
+    }
   } else {
     Serial.printf("[HTTP] POST Error code: %d\n", httpResponseCode);
     Serial.printf("[HTTP] Error message: %s\n", http.errorToString(httpResponseCode).c_str());
