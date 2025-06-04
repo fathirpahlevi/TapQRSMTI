@@ -11,6 +11,7 @@
 Wiegand wiegand;
 
 String hexString = "";
+String oldHexString = "";
 
 // It's good practice to define constants for SSIDs, passwords, and URLs
 const char* ssid = "Otomasi Industri";
@@ -43,6 +44,19 @@ void setup() {
   pinStateChanged();
 }
 
+void loop() {
+  // Example of calling the function with a delay
+  noInterrupts();
+  wiegand.flush();
+  interrupts();
+  if(hexString != oldHexString){
+    Serial.println("New Data");
+    oldHexString = data;
+  }
+}
+void checkChanges(String data){
+
+}
 void sendPostRequest(String data) {
   // Always check connection right before starting the request
   if (!WiFi.isConnected()) {
@@ -84,14 +98,6 @@ void sendPostRequest(String data) {
   Serial.print("[HTTP] end...\n");
   http.end(); // Ensure resources are freed
 }
-
-void loop() {
-  // Example of calling the function with a delay
-  noInterrupts();
-  wiegand.flush();
-  interrupts();
-}
-
 
 void pinStateChanged() {
   wiegand.setPin0State(digitalRead(PIN_D0));
