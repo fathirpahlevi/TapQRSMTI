@@ -2,7 +2,7 @@
 #include <HTTPClient.h>
 #include <HTTPClient.h>
 #include <Wiegand.h>
-
+#include <ArduinoJson.h>
 // These are the pins connected to the Wiegand D0 and D1 signals.
 #define PIN_D0 22   
 #define PIN_D1 23
@@ -16,18 +16,64 @@ Wiegand wiegand;
 String hexString = "";
 String oldHexString = "";
 
+String getResponse = "";
+
 bool gateOpen = false;
 bool gateOpened = false;
 bool noDataFound = false;
 bool comError = false;
 bool grantedBeep = false;
 
+String waktu = "";
+String postResponse = "";
+String userID = "";
+
 unsigned long currentTime = 0;
 unsigned long timer1 = 0;
 // It's good practice to define constants for SSIDs, passwords, and URLs
-const char* ssid = "Otomasi Industri";
-const char* password = "12otomasi3";
-const char* serverUrl = "http://192.168.250.10:1881/data";
+const char* ssid = "SMTI-PRO";
+const char* password = "";
+const char* waktuAPI = "http://192.168.1.199:1881/waktu";
+const char* sendDataAPI = "http://192.168.1.199:1881/masuk";
+
+String getRequest(const char* serverUrl) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi not connected. Cannot perform HTTP GET.");
+    return ""; // Return empty string if not connected
+  }
+  HTTPClient http;
+  String payload = "";
+
+  Serial.print("[HTTP] begin for URL: ");
+  Serial.println(serverUrl);
+
+  // Your Domain name with URL path or IP address with path
+  http.begin(serverUrl);
+
+  Serial.print("[HTTP] GET...\n");
+  // start connection and send HTTP GET request
+  int httpCode = http.GET();
+
+  // httpCode will be negative on error
+  if (httpCode > 0) {
+    // HTTP header has been sent and server response header has been handled
+    Serial.printf("[HTTP] GET... code: %d\n", httpCode);
+
+    // file found at server
+    if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY) {
+      payload = http.getString();
+      Serial.println("Response Payload:");
+      Serial.println(payload);
+    } else {
+      Serial.printf("[HTTP] Server responded with error code: %d\n", httpCode);
+    }
+  } else {
+    Serial.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
+  }
+
+  http.end(); // Free the resources
+  return payload;
+}
 
 void setup() {
   Serial.begin(115200);
@@ -69,7 +115,16 @@ void loop() {
   interrupts();
   if(hexString != oldHexString){
     Serial.println("New Data");
-    if(hexString.length() > 0)sendPostRequest(hexString);
+    if(hexString.length() > 0){
+      
+      JsonDocument doc;
+      getResponse = getRequest(waktuAPI);
+      deserializeJson(doc,getResponse);
+      waktu = doc["waktu"].as<String>();
+      Serial.print("Waktu : ");
+      Serial.println(waktu);
+      sendPostRequest(waktu,hexString);
+    }
     oldHexString = hexString;
     hexString = "";
   }
@@ -78,12 +133,12 @@ void loop() {
 
 void gateControl(){
   if(gateOpen){
-  digitalWrite(OUT,HIGH);
+  digitalWrite(OUT,LOW);
   digitalWrite(LED,LOW);
   gateOpened = true;
   }
   else{
-    digitalWrite(OUT,LOW);
+    digitalWrite(OUT,HIGH);
     digitalWrite(LED,HIGH);
     gateOpened = false;
   }
@@ -107,7 +162,7 @@ void gateControl(){
   }
 }
 
-void sendPostRequest(String data) {
+void sendPostRequest(String waktu, String data) {
   // Always check connection right before starting the request
   if (!WiFi.isConnected()) {
     Serial.println("WiFi not connected. Cannot send POST request.");
@@ -119,12 +174,12 @@ void sendPostRequest(String data) {
   HTTPClient http;
 
   Serial.print("[HTTP] begin...\n");
-  http.begin(serverUrl); // Use the constant URL
+  http.begin(sendDataAPI); // Use the constant URL
 
   Serial.print("[HTTP] set headers...\n");
   http.addHeader("Content-Type", "application/json"); // Correct header name
 
-  String httpRequestData = "{\"data\":\""+ data +"\"}";
+  String httpRequestData = "{\"waktu\":\""+waktu+"\",\"userID\":\""+ data +"\"}";
   Serial.print("[HTTP] POST data: ");
   Serial.println(httpRequestData);
 
@@ -140,11 +195,18 @@ void sendPostRequest(String data) {
     String payload = http.getString();
     Serial.println("POST Payload:");
     Serial.println(payload);
-    if(payload == "Data Found"){
+    JsonDocument doc;
+    deserializeJson(doc,payload);
+    postResponse = doc["status"].as<String>();
+    Serial.print("Status : ");
+    Serial.println(postResponse);
+    if(postResponse == "Accepted"){
+      Serial.println("Accepted");
       gateOpen = true;
       timer1 = currentTime;
     }
     else{
+      Serial.println("Refused");
       noDataFound = true;
       timer1 = currentTime;
     }
