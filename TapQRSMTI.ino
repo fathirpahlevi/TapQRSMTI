@@ -7,11 +7,11 @@
 #include <NetworkUdp.h>
 #include <ArduinoOTA.h>
 // These are the pins connected to the Wiegand D0 and D1 signals.
-#define PIN_D0 12   
-#define PIN_D1 14
-#define BEEPER 27   
-#define LED 26
-#define OUT 13
+#define PIN_D0 13   
+#define PIN_D1 12
+#define BEEPER 14   
+#define LED 27
+#define OUT 26
 #define espON1 25
 #define espON2 33
 
@@ -40,9 +40,9 @@ unsigned long timer1 = 0;
 const char* ssid = "SMTI-PRO";
 const char* password = "";
 const char* waktuAPI = "http://192.168.1.199:1881/waktu";
-const char* sendDataAPI = "http://192.168.1.199:1881/masuk";
+const char* sendDataAPI = "http://192.168.1.199:1881/keluar";
 
-const char* hostname = "SMTI Gate Entry";
+const char* hostname = "SMTI Gate Exit";
 
 String getRequest(const char* serverUrl) {
   if (WiFi.status() != WL_CONNECTED) {
@@ -90,6 +90,15 @@ String getRequest(const char* serverUrl) {
 
 void setup() {
   Serial.begin(115200);
+  IPAddress local_IP(192, 168, 0, 141);
+  IPAddress gateway(192, 168, 1, 254);
+  IPAddress subnet(255, 255, 248, 0);
+  IPAddress primaryDNS(192, 168, 1, 254); //optional
+  
+  
+  if (!WiFi.config(local_IP, gateway, subnet, primaryDNS)) {
+    Serial.println("STA Failed to configure");
+  }
   WiFi.setHostname(hostname);
   WiFi.begin(ssid, password); 
 
@@ -160,8 +169,8 @@ void setup() {
   pinMode(BEEPER,OUTPUT);
   pinMode(espON1,OUTPUT);
   pinMode(espON2,OUTPUT);
-  digitalWrite(espON1,LOW);
-  digitalWrite(espON2,LOW);
+  digitalWrite(espON1,HIGH);
+  digitalWrite(espON2,HIGH);
   digitalWrite(LED,LOW);
   digitalWrite(BEEPER,LOW);
 }
@@ -207,13 +216,13 @@ void loop() {
 
 void gateControl(){
   if(gateOpen){
-  digitalWrite(OUT,LOW);
+  digitalWrite(OUT,HIGH);
   digitalWrite(2,LOW);
   digitalWrite(LED,HIGH);
   gateOpened = true;
   }
   else{
-    digitalWrite(OUT,HIGH);
+    digitalWrite(OUT,LOW);
     digitalWrite(2,HIGH);
     digitalWrite(LED,LOW);
     gateOpened = false;
