@@ -12,8 +12,9 @@
 #define BEEPER 14   
 #define LED 27
 #define OUT 26
-#define espON1 25
-#define espON2 33
+#define espON1 15
+#define espON2 4
+#define yellowLED 22
 
 // The object that handles the wiegand protocol
 Wiegand wiegand;
@@ -25,17 +26,23 @@ String getResponse = "";
 
 bool gateOpen = false;
 bool gateOpened = false;
+bool requesting = false;
 bool noDataFound = false;
 bool comError = false;
 bool getError = false;
+bool beep = false;
 bool grantedBeep = false;
 bool statusState = false;
+
+uint8_t status = 0;
 String waktu = "";
 String postResponse = "";
 String userID = "";
 
 unsigned long currentTime = 0;
 unsigned long timer1 = 0;
+unsigned long timer2 = 0;
+unsigned long timer3 = 0;
 // It's good practice to define constants for SSIDs, passwords, and URLs
 const char* ssid = "SMTI-PRO";
 const char* password = "";
@@ -76,12 +83,12 @@ String getRequest(const char* serverUrl) {
     } else {
       Serial.printf("[HTTP] Server responded with error code: %d\n", httpCode);
       getError = true;
-      timer1 = currentTime;
+      status = 25;
     }
   } else {
     Serial.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
     getError = true;
-    timer1 = currentTime;
+    status = 25;
   }
 
   http.end(); // Free the resources
@@ -169,10 +176,13 @@ void setup() {
   pinMode(BEEPER,OUTPUT);
   pinMode(espON1,OUTPUT);
   pinMode(espON2,OUTPUT);
+  pinMode(yellowLED,OUTPUT);
   digitalWrite(espON1,HIGH);
   digitalWrite(espON2,HIGH);
+  digitalWrite(2,HIGH);
   digitalWrite(LED,LOW);
   digitalWrite(BEEPER,LOW);
+  digitalWrite(yellowLED,HIGH);
 }
 
 void loop() {
@@ -184,7 +194,8 @@ void loop() {
   if(hexString != oldHexString){
     Serial.println("New Data");
     if(hexString.length() > 0){
-      
+      digitalWrite(yellowLED,LOW);
+      requesting = true;
       JsonDocument doc;
       getResponse = getRequest(waktuAPI);
       deserializeJson(doc,getResponse);
@@ -195,8 +206,7 @@ void loop() {
       sendPostRequest(waktu,hexString);
       }
       else {
-        comError = true;
-        timer1 = currentTime;
+        status = 30;
       }
     }
     oldHexString = hexString;
@@ -206,8 +216,8 @@ void loop() {
     gateControl();
   }
   else{
-    if(currentTime - timer1 >= 500){
-      timer1 = currentTime;
+    if(currentTime - timer2 >= 500){
+      timer2 = currentTime;
       statusState = !statusState;
       digitalWrite(2, statusState);
     }
@@ -215,48 +225,102 @@ void loop() {
 }
 
 void gateControl(){
+  switch (status) {
+    case 0: // If button is pressed
+      gateOpen = false;
+      gateOpened = false;
+      requesting = false;
+      noDataFound = false;
+      comError = false;
+      getError = false;
+      beep = false;
+      break;
+
+    case 10: // Accepted
+      gateOpen = true;
+      timer1 = currentTime;
+      if(gateOpened)status = 15;
+      break;
+
+    case 15: // If button is not pressed
+      break;
+
+    case 20: // Refused
+      noDataFound = true;
+      timer2 = currentTime;
+      if(beep)status = 21;
+      break;
+
+    case 21: // If button is not pressed
+      break;
+
+    case 25: // Get Error
+      status = 30;
+      break;
+
+    case 30: // Post Error
+      comError = true;
+      timer3 = currentTime;
+      if(beep)status = 31;
+      break;
+    case 31:
+      break;
+
+    default: // Optional: Handle unexpected states
+      Serial.println("Unknown state");
+      break;
+  }
   if(gateOpen){
-  digitalWrite(OUT,HIGH);
-  digitalWrite(2,LOW);
-  digitalWrite(LED,HIGH);
-  gateOpened = true;
+    digitalWrite(OUT,HIGH);
+    digitalWrite(LED,HIGH);
+    gateOpened = true;
+  }
+  if(gateOpened){
+    gateOpen = false;
+    if(currentTime - timer1 >= 1000){
+      Serial.println("Gate Opened");
+      status = 0;
+    }
   }
   else{
     digitalWrite(OUT,LOW);
-    digitalWrite(2,HIGH);
     digitalWrite(LED,LOW);
-    gateOpened = false;
-  }
-  if(gateOpened){
-    if(currentTime - timer1 >= 1000)gateOpen = false;
   }
   if(noDataFound){
-    digitalWrite(BEEPER,HIGH);
     Serial.println("NO DATA FOUND");
-    if(currentTime - timer1 >= 1000 && currentTime - timer1 < 2010){
-      digitalWrite(BEEPER,LOW);
-      noDataFound = false;
-    }
+    digitalWrite(BEEPER,HIGH);
+    beep = true;
   }
   if(comError){
-    if(currentTime - timer1 < 100){
-      digitalWrite(BEEPER,HIGH);
-    }
     Serial.println("Communication Error");
-    if(currentTime - timer1 >= 100 && currentTime - timer1 < 400){
-      digitalWrite(BEEPER,LOW);
-    }
-    if(currentTime - timer1 >= 400 && currentTime - timer1 < 500){
-      digitalWrite(BEEPER,HIGH);
-      comError = false;
-    }
-    if(currentTime - timer1 >= 600){
-      digitalWrite(BEEPER,LOW);
-      comError = false;
-    }
-
+    digitalWrite(yellowLED,HIGH);
+    requesting = false;
+    beep = true;
   }
   if(!comError && !noDataFound)digitalWrite(BEEPER,LOW);
+  if(beep && noDataFound){
+    if(currentTime - timer2 >= 1000){
+      status = 0;
+    }
+  }
+  else if(beep && comError){
+    if(currentTime - timer3 < 300){
+      digitalWrite(BEEPER,HIGH);
+    }
+    if(currentTime - timer3 >= 300 && currentTime - timer3 < 400){
+      digitalWrite(BEEPER,LOW);
+    }
+    if(currentTime - timer3 >= 400 && currentTime - timer3 < 700){
+      digitalWrite(BEEPER,HIGH);
+    }
+    if(currentTime - timer3 >= 700){
+      digitalWrite(BEEPER,LOW);
+      status = 0;
+    }
+  }
+  else digitalWrite(BEEPER,LOW);
+
+
 }
 
 void sendPostRequest(String waktu, String data) {
@@ -289,7 +353,6 @@ void sendPostRequest(String waktu, String data) {
 
   if (httpResponseCode > 0) {
     getError = false;
-    timer1 = currentTime;
     Serial.printf("[HTTP] POST Response code: %d\n", httpResponseCode);
     String payload = http.getString();
     Serial.println("POST Payload:");
@@ -299,20 +362,20 @@ void sendPostRequest(String waktu, String data) {
     postResponse = doc["status"].as<String>();
     Serial.print("Status : ");
     Serial.println(postResponse);
+    requesting = false;
+    digitalWrite(yellowLED,HIGH);
     if(postResponse == "Accepted"){
       Serial.println("Accepted");
-      gateOpen = true;
+      status = 10;
     }
     else{
       Serial.println("Refused");
-      noDataFound = true;
-      timer1 = currentTime;
+      status = 20;
     }
   } else {
     Serial.printf("[HTTP] POST Error code: %d\n", httpResponseCode);
     Serial.printf("[HTTP] Error message: %s\n", http.errorToString(httpResponseCode).c_str());
-    comError = true;
-    timer1 = currentTime;
+    status = 30;
   }
 
   Serial.print("[HTTP] end...\n");
