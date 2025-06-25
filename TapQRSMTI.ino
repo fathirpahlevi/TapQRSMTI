@@ -7,14 +7,14 @@
 #include <NetworkUdp.h>
 #include <ArduinoOTA.h>
 // These are the pins connected to the Wiegand D0 and D1 signals.
-#define PIN_D0 13   
-#define PIN_D1 12
-#define BEEPER 14   
-#define LED 27
+#define PIN_D0 14
+#define PIN_D1 13
+#define BEEPER 33   
+#define LED 25
 #define OUT 26
-#define espON1 15
-#define espON2 4
-#define yellowLED 22
+#define espON1 12
+#define espON2 27
+#define yellowLED 32
 
 // The object that handles the wiegand protocol
 Wiegand wiegand;
