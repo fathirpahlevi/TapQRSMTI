@@ -1,11 +1,11 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
-#include <HTTPClient.h>
 #include <Wiegand.h>
 #include <ArduinoJson.h>
 #include <ESPmDNS.h>
 #include <NetworkUdp.h>
 #include <ArduinoOTA.h>
+#include <PubSubClient.h>
 // These are the pins connected to the Wiegand D0 and D1 signals.
 #define PIN_D0 14
 #define PIN_D1 13
@@ -20,6 +20,7 @@
 Wiegand wiegand;
 
 String hexString = "";
+String hexStringBuffer = "";
 String oldHexString = "";
 
 String getResponse = "";
@@ -35,6 +36,8 @@ bool grantedBeep = false;
 bool statusState = false;
 
 uint8_t status = 0;
+uint8_t retryCount = 0;
+uint8_t failedCount = 0;
 String waktu = "";
 String postResponse = "";
 String userID = "";
@@ -48,8 +51,14 @@ const char* ssid = "SMTI-PRO";
 const char* password = "";
 const char* waktuAPI = "http://192.168.1.199:1881/waktu";
 const char* sendDataAPI = "http://192.168.1.199:1881/keluar";
-
+const char* mqtt_server = "192.168.1.199";
 const char* hostname = "SMTI Gate Exit";
+
+WiFiClient wifiClient;
+PubSubClient client(wifiClient);
+unsigned long lastMsg = 0;
+#define MSG_BUFFER_SIZE	(50)
+char msg[MSG_BUFFER_SIZE];
 
 String getRequest(const char* serverUrl) {
   if (WiFi.status() != WL_CONNECTED) {
@@ -64,7 +73,9 @@ String getRequest(const char* serverUrl) {
 
   // Your Domain name with URL path or IP address with path
   http.begin(serverUrl);
-
+  
+  http.setConnectTimeout(2000);
+  http.setTimeout(2000); 
   Serial.print("[HTTP] GET...\n");
   // start connection and send HTTP GET request
   int httpCode = http.GET();
@@ -95,6 +106,51 @@ String getRequest(const char* serverUrl) {
   return payload;
 }
 
+void callback(char* topic, byte* payload, unsigned int length) {
+  Serial.print("Message arrived [");
+  Serial.print(topic);
+  Serial.print("] ");
+
+  // Declare a variable to store the result
+  String result = "";
+
+  for (int i = 0; i < length; i++) {
+    result += (char)payload[i];
+  }
+
+  // Print the result to serial
+  Serial.println(result);
+  
+  // Switch on the LED if an 1 was received as first character
+  if (result == "Gate Open") {
+    status = 10;
+  }
+
+}
+
+void reconnect() {
+  // Loop until we're reconnected
+  while (!client.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    // Create a random client ID
+    String clientId = hostname;
+    clientId += String(random(0xffff), HEX);
+    // Attempt to connect
+    if (client.connect(clientId.c_str())) {
+      Serial.println("connected");
+      // Once connected, publish an announcement...
+      client.publish("gateExit", "Connected");
+      // ... and resubscribe
+      client.subscribe("gateExit");
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+      // Wait 5 seconds before retrying
+      delay(5000);
+    }
+  }
+}
 void setup() {
   Serial.begin(115200);
   IPAddress local_IP(192, 168, 0, 141);
@@ -170,6 +226,9 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(PIN_D1), pinStateChanged, CHANGE);
   pinStateChanged();
 
+  client.setServer(mqtt_server, 8833);
+  client.setCallback(callback);
+
   pinMode(OUT,OUTPUT);
   pinMode(2,OUTPUT);
   pinMode(LED,OUTPUT);
@@ -204,6 +263,7 @@ void loop() {
       Serial.println(waktu);
       if(!getError){
       sendPostRequest(waktu,hexString);
+      hexStringBuffer = hexString;
       }
       else {
         status = 30;
@@ -222,6 +282,10 @@ void loop() {
       digitalWrite(2, statusState);
     }
   }
+  if (!client.connected()) {
+    reconnect();
+  }
+  client.loop();
 }
 
 void gateControl(){
@@ -234,6 +298,7 @@ void gateControl(){
       comError = false;
       getError = false;
       beep = false;
+      retryCount = 0;
       break;
 
     case 10: // Accepted
@@ -242,7 +307,7 @@ void gateControl(){
       if(gateOpened)status = 15;
       break;
 
-    case 15: // If button is not pressed
+    case 15:
       break;
 
     case 20: // Refused
@@ -251,7 +316,7 @@ void gateControl(){
       if(beep)status = 21;
       break;
 
-    case 21: // If button is not pressed
+    case 21:
       break;
 
     case 25: // Get Error
@@ -261,10 +326,42 @@ void gateControl(){
     case 30: // Post Error
       comError = true;
       timer3 = currentTime;
-      if(beep)status = 31;
+      status = 31;
       break;
     case 31:
+      if(failedCount > 2){
+        ESP.restart();
+      }
+      if(retryCount > 4){
+        failedCount++;
+        status = 35;
+      }
+      else{
+        retryCount++;
+        status = 32;
+      }
       break;
+    case 32: // Communication Retry
+      if(currentTime - timer3 >= 500){
+        digitalWrite(yellowLED,LOW);
+        requesting = true;
+        JsonDocument doc;
+        getResponse = getRequest(waktuAPI);
+        deserializeJson(doc,getResponse);
+        waktu = doc["waktu"].as<String>();
+        Serial.print("Waktu : ");
+        Serial.println(waktu);
+        if(!getError){
+        sendPostRequest(waktu,hexStringBuffer);
+        }
+      }
+      break;
+    case 35:
+      if(beep)status = 36;
+      break;
+    case 36:
+      break;
+      
 
     default: // Optional: Handle unexpected states
       Serial.println("Unknown state");
@@ -287,15 +384,16 @@ void gateControl(){
     digitalWrite(LED,LOW);
   }
   if(noDataFound){
-    Serial.println("NO DATA FOUND");
     digitalWrite(BEEPER,HIGH);
     beep = true;
   }
   if(comError){
     Serial.println("Communication Error");
-    digitalWrite(yellowLED,HIGH);
-    requesting = false;
-    beep = true;
+    if(status == 31){
+      digitalWrite(yellowLED,HIGH);
+      requesting = false;
+    }
+    if(status == 35)beep = true;
   }
   if(!comError && !noDataFound)digitalWrite(BEEPER,LOW);
   if(beep && noDataFound){
@@ -345,8 +443,8 @@ void sendPostRequest(String waktu, String data) {
   Serial.println(httpRequestData);
 
   // Set timeouts to prevent hanging and Watchdog Timer resets
-  http.setConnectTimeout(2000); // 5 seconds
-  http.setTimeout(2500); // 8 seconds
+  http.setConnectTimeout(2000);
+  http.setTimeout(2500); 
 
   Serial.print("[HTTP] performing POST request...\n");
   int httpResponseCode = http.POST(httpRequestData);
