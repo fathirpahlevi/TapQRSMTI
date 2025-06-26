@@ -19,6 +19,7 @@
 Wiegand wiegand;
 
 String hexString = "";
+String hexStringBuffer = "";
 String oldHexString = "";
 
 String getResponse = "";
@@ -194,7 +195,7 @@ void loop() {
   noInterrupts();
   wiegand.flush();
   interrupts();
-  if(hexString != oldHexString && status == 0){
+  if(hexString != oldHexString){
     Serial.println("New Data");
     if(hexString.length() > 0){
       digitalWrite(yellowLED,LOW);
@@ -207,6 +208,7 @@ void loop() {
       Serial.println(waktu);
       if(!getError){
       sendPostRequest(waktu,hexString);
+      hexStringBuffer = hexString;
       }
       else {
         status = 30;
@@ -291,7 +293,7 @@ void gateControl(){
         Serial.print("Waktu : ");
         Serial.println(waktu);
         if(!getError){
-        sendPostRequest(waktu,oldHexString);
+        sendPostRequest(waktu,hexStringBuffer);
         }
       }
       break;
