@@ -48,8 +48,8 @@ unsigned long timer3 = 0;
 // It's good practice to define constants for SSIDs, passwords, and URLs
 const char* ssid = "SMTI-PRO";
 const char* password = "";
-const char* waktuAPI = "http://192.168.1.199:1881/waktu";
-const char* sendDataAPI = "http://192.168.1.199:1881/keluar";
+const char* waktuAPI = "http://192.168.1.199:18801/waktu";
+const char* sendDataAPI = "http://192.168.1.199:18801/keluar";
 
 const char* hostname = "SMTI Gate Exit";
 
@@ -66,6 +66,7 @@ String getRequest(const char* serverUrl) {
 
   // Your Domain name with URL path or IP address with path
   http.begin(serverUrl);
+  http.setAuthorization("dXNlcjpvdG9tYXNpMTIz");
   
   http.setConnectTimeout(2000);
   http.setTimeout(2000); 
@@ -112,7 +113,9 @@ void setup() {
   }
   WiFi.setHostname(hostname);
   WiFi.begin(ssid, password); 
-
+  
+  
+  
   while (WiFi.status() != WL_CONNECTED) {
     Serial.print("."); // Print a dot to show activity
     digitalWrite(2, HIGH); // Turn LED on
@@ -195,6 +198,7 @@ void loop() {
   noInterrupts();
   wiegand.flush();
   interrupts();
+  ArduinoOTA.handle();
   if(hexString != oldHexString){
     Serial.println("New Data");
     if(hexString.length() > 0){
@@ -375,6 +379,7 @@ void sendPostRequest(String waktu, String data) {
 
   Serial.print("[HTTP] begin...\n");
   http.begin(sendDataAPI); // Use the constant URL
+  http.setAuthorization("dXNlcjpvdG9tYXNpMTIz");
 
   Serial.print("[HTTP] set headers...\n");
   http.addHeader("Content-Type", "application/json"); // Correct header name
