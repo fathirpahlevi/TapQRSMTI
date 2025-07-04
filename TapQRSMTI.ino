@@ -1,10 +1,13 @@
 #include <WiFi.h>
+#include <WiFiClient.h>
+#include <WebServer.h>
 #include <HTTPClient.h>
 #include <Wiegand.h>
 #include <ArduinoJson.h>
 #include <ESPmDNS.h>
 #include <NetworkUdp.h>
-#include <ArduinoOTA.h>
+#include <PubSubClient.h>
+#include <ElegantOTA.h>
 // These are the pins connected to the Wiegand D0 and D1 signals.
 #define PIN_D0 14
 #define PIN_D1 13
@@ -48,10 +51,22 @@ unsigned long timer3 = 0;
 // It's good practice to define constants for SSIDs, passwords, and URLs
 const char* ssid = "SMTI-PRO";
 const char* password = "";
-const char* waktuAPI = "http://192.168.1.199:18801/waktu";
-const char* sendDataAPI = "http://192.168.1.199:18801/keluar";
-
+const char* waktuAPI = "http://192.168.1.199:1881/waktu";
+const char* sendDataAPI = "http://192.168.1.199:1881/keluar";
+const char* mqtt_server = "192.168.1.199";
 const char* hostname = "SMTI Gate Exit";
+
+WebServer server(80);
+WiFiClient wifiClient;
+PubSubClient client(wifiClient);
+unsigned long lastMsg = 0;
+#define MSG_BUFFER_SIZE	(50)
+char msg[MSG_BUFFER_SIZE];
+
+unsigned long ota_progress_millis = 0;
+
+#include <setup.h>
+
 
 String getRequest(const char* serverUrl) {
   if (WiFi.status() != WL_CONNECTED) {
@@ -99,72 +114,13 @@ String getRequest(const char* serverUrl) {
   http.end(); // Free the resources
   return payload;
 }
-
 void setup() {
+  pinMode(2,OUTPUT);
+  digitalWrite(2,LOW);
   Serial.begin(115200);
-  IPAddress local_IP(192, 168, 0, 141);
-  IPAddress gateway(192, 168, 1, 254);
-  IPAddress subnet(255, 255, 248, 0);
-  IPAddress primaryDNS(192, 168, 1, 254); //optional
-  
-  
-  if (!WiFi.config(local_IP, gateway, subnet, primaryDNS)) {
-    Serial.println("STA Failed to configure");
-  }
-  WiFi.setHostname(hostname);
-  WiFi.begin(ssid, password); 
-  
-  
-  
-  while (WiFi.status() != WL_CONNECTED) {
-    Serial.print("."); // Print a dot to show activity
-    digitalWrite(2, HIGH); // Turn LED on
-    delay(500); // Short delay for blink effect
-    digitalWrite(2, LOW); // Turn LED off
-    delay(500); // Short delay for blink effect
-  }
-  Serial.println("\nWiFi connected!");
-  Serial.print("IP Address: ");
-  Serial.println(WiFi.localIP());
-  
-  ArduinoOTA.setHostname(hostname);
-  ArduinoOTA.setPasswordHash("83eaebf5769ba0437dae13a2c0d1a1ea");
 
-  ArduinoOTA
-    .onStart([]() {
-      String type;
-      if (ArduinoOTA.getCommand() == U_FLASH) {
-        type = "sketch";
-      } else {  // U_SPIFFS
-        type = "filesystem";
-      }
-
-      // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
-      Serial.println("Start updating " + type);
-    })
-    .onEnd([]() {
-      Serial.println("\nEnd");
-    })
-    .onProgress([](unsigned int progress, unsigned int total) {
-      Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
-    })
-    .onError([](ota_error_t error) {
-      Serial.printf("Error[%u]: ", error);
-      if (error == OTA_AUTH_ERROR) {
-        Serial.println("Auth Failed");
-      } else if (error == OTA_BEGIN_ERROR) {
-        Serial.println("Begin Failed");
-      } else if (error == OTA_CONNECT_ERROR) {
-        Serial.println("Connect Failed");
-      } else if (error == OTA_RECEIVE_ERROR) {
-        Serial.println("Receive Failed");
-      } else if (error == OTA_END_ERROR) {
-        Serial.println("End Failed");
-      }
-    });
-
-  ArduinoOTA.begin();
-
+  wifiSetup();
+  
   wiegand.onReceive(receivedData, "Card readed: ");
   wiegand.onReceiveError(receivedDataError, "Card read error: ");
   wiegand.onStateChange(stateChanged, "State changed: ");
@@ -177,19 +133,19 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(PIN_D1), pinStateChanged, CHANGE);
   pinStateChanged();
 
-  pinMode(OUT,OUTPUT);
-  pinMode(2,OUTPUT);
-  pinMode(LED,OUTPUT);
-  pinMode(BEEPER,OUTPUT);
-  pinMode(espON1,OUTPUT);
-  pinMode(espON2,OUTPUT);
-  pinMode(yellowLED,OUTPUT);
-  digitalWrite(espON1,HIGH);
-  digitalWrite(espON2,HIGH);
-  digitalWrite(2,HIGH);
-  digitalWrite(LED,LOW);
-  digitalWrite(BEEPER,LOW);
-  digitalWrite(yellowLED,HIGH);
+  client.setServer(mqtt_server, 8833);
+  client.setCallback(callback);
+
+  ElegantOTA.begin(&server);    // Start ElegantOTA
+  // ElegantOTA callbacks
+  ElegantOTA.onStart(onOTAStart);
+  ElegantOTA.onProgress(onOTAProgress);
+  ElegantOTA.onEnd(onOTAEnd);
+
+  server.begin();
+  Serial.println("HTTP server started");
+
+  inputOutputSetup();
 }
 
 void loop() {
@@ -198,7 +154,6 @@ void loop() {
   noInterrupts();
   wiegand.flush();
   interrupts();
-  ArduinoOTA.handle();
   if(hexString != oldHexString){
     Serial.println("New Data");
     if(hexString.length() > 0){
@@ -231,6 +186,12 @@ void loop() {
       digitalWrite(2, statusState);
     }
   }
+  if (!client.connected()) {
+    reconnect();
+  }
+  client.loop();
+  server.handleClient();
+  ElegantOTA.loop();
 }
 
 void gateControl(){
