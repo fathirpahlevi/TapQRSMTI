@@ -36,6 +36,7 @@ bool getError = false;
 bool beep = false;
 bool grantedBeep = false;
 bool statusState = false;
+bool retrying = false;
 
 uint8_t status = 0;
 uint8_t retryCount = 0;
@@ -116,7 +117,7 @@ String getRequest(const char* serverUrl) {
 }
 void setup() {
   pinMode(2,OUTPUT);
-  digitalWrite(2,LOW);
+  digitalWrite(2,HIGH);
   Serial.begin(115200);
 
   wifiSetup();
@@ -157,6 +158,7 @@ void loop() {
   if(hexString != oldHexString){
     Serial.println("New Data");
     if(hexString.length() > 0){
+      if(requesting)retrying = true;
       digitalWrite(yellowLED,LOW);
       requesting = true;
       JsonDocument doc;
@@ -235,10 +237,11 @@ void gateControl(){
       status = 31;
       break;
     case 31:
-      if(failedCount > 2){
+      if(retrying)ESP.restart();
+      if(failedCount > 0 ){
         ESP.restart();
       }
-      if(retryCount > 4){
+      if(retryCount > 2){
         failedCount++;
         status = 35;
       }
